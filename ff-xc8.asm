@@ -921,7 +921,6 @@ DEFTASKSKIP:
     call    HERE    ;here
     call    ROM_
     call    HERE    ; This gets the same value that ends up being stored in the task word
-		    ; I'm not sure why the first HERE is called in ram but this one must be in rom (flash) to yield the same value
     call    SWOP    ; RAM HERE on TOS
     call    COMMA   ;,
     rcall   POPF_   ; Pop FLASH HERE into r26 and r27
@@ -935,7 +934,7 @@ DEFTASKSKIP:
     rcall   PUSHF_  ; Push 4 to stack
     rcall   DEFTASKLOOP
     pop	    r26	    ; Get FLASH HERE back in r26/r27
-    pop	    r27	    ; This is used by DEFINIT to immediately push the address to return stack after def / before init
+    pop	    r27	    ; This is used by DEFINRUN to immediately push the address to return stack after def / before init
     ret
 ; Append parameters to flash and allot space in ram
 DEFTASKLOOP:
@@ -1308,7 +1307,6 @@ DEFINRUN:
     call    ROM_    ;flash
     call    CREATE  ;create
     rcall   DEFTASKSKIP ; Call DEFTASK with 4 params on stack
-    ;call    LATEST_ ; Push address of latest-defined word (user-defined task word)
     rcall   PUSHF_  ; (taskloop-addr task-addr -- )
     call    TUCK    ; (task-addr taskloop-addr task-addr -- )
     rcall   TINIT   ; Consumes top 2 stack items leaving (task-addr -- )
