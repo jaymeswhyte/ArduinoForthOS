@@ -791,10 +791,41 @@ CWD:
         ret
 
 ;------------------------------------------------------------
-; Final Year Project - User Defined words
+; Final Year Project - Expanded Dictionary
+	
+PUSHF_:
+    m_dup
+    mov	    tosl, r26	; Low byte is in r26
+    mov	    tosh, r27	; High byte in r27
+    ret
+    
+POPF_:
+    mov	    r26, tosl
+    mov	    r27, tosh
+    m_drop
+    ret
+PARSEPIN_:
+    rcall   POPF_
+    cpi	    r26, 8
+    ldi	    r27, 0x01
+    brge    IS_PORTB
+    ldi	    r16, 0
+    rjmp    PIN_MASK
+IS_PORTB:
+    subi    r26, 8
+    ldi	    r16, 1
+PIN_MASK:
+    cpi	    r26, 0 
+    breq    MASK_DONE
+    dec	    r26
+    lsl	    r27
+    rjmp    PIN_MASK
+MASK_DONE:
+    ret	    ; R27-Pin Mask; R16 - PORTD/PORTB(0/1)
 
-; Multitasking / Time-Sharing related stuff:
-; Translated into AVR ASM from forth implementation written my Mikael Nordman
+; Multitasking / Time-Sharing related words:
+; Translated into AVR ASM (with some modifications) from Forth implementation written my Mikael Nordman
+    
 ; Store value on stack to user pointer
 STOREUP_:
     call UPTR
@@ -831,49 +862,13 @@ HIS_L:
     .ascii  "his"
     .align  1
 HIS:
-    rcall FETCHUP_ ; Push user process addr to TOS
-    call MINUS ; Subtract variable address from user process pointer to get variable address offset
-    call SWOP ; Swap top two items
-    call FETCH ; Get value at task-addr (TOS)
-    call PLUS ; Add task-addr value to var offset to find the literal address
+    rcall   FETCHUP_	; Push user process addr to TOS
+    call    MINUS	; Subtract variable address from user process pointer to get variable address offset
+    call    SWOP	; Swap top two items
+    call    FETCH	; Get value at task-addr (TOS)
+    call    PLUS	; Add task-addr value to var offset to find the literal address
 fdw HIS_L
-    
 
-    
-	
-; End multitasking stuff
-    
-    
-PUSHF_:
-    m_dup
-    mov	    tosl, r26	; Low byte is in r26
-    mov	    tosh, r27	; High byte in r27
-    ret
-    
-POPF_:
-    mov	    r26, tosl
-    mov	    r27, tosh
-    m_drop
-    ret
-PARSEPIN_:
-    rcall   POPF_
-    cpi	    r26, 8
-    ldi	    r27, 0x01
-    brge    IS_PORTB
-    ldi	    r16, 0
-    rjmp    PIN_MASK
-IS_PORTB:
-    subi    r26, 8
-    ldi	    r16, 1
-PIN_MASK:
-    cpi	    r26, 0 
-    breq    MASK_DONE
-    dec	    r26
-    lsl	    r27
-    rjmp    PIN_MASK
-MASK_DONE:
-    ret	    ; R27-Pin Mask; R16 - PORTD/PORTB(0/1)
-    
 .word     0
 ; Define a new task (tibsize stacksize rsize addsize -- )
 DEFTASK_L:
@@ -1217,7 +1212,9 @@ TASKSEND:
     rcall   STOREUP_	; Set UP back to its original value
     ret
 fdw TASKS_L
-  
+; End of translated code
+    
+    
 ; Define and initialize a task with parameters 0 10 10 0 (5 Item stack)
 ;	(taskloop-addr -- )
 SMALLTASK_L:
@@ -1278,16 +1275,18 @@ DEFINRUN_L:
     .ascii  "definrun:"
     .align  1
 DEFINRUN:
-    call    ROM_    ;flash
-    call    CREATE  ;create
+    call    ROM_	;flash
+    call    CREATE	;create
     rcall   DEFTASKSKIP ; Call DEFTASK with 4 params on stack
-    rcall   PUSHF_  ; (taskloop-addr task-addr -- )
-    call    TUCK    ; (task-addr taskloop-addr task-addr -- )
-    rcall   TINIT   ; Consumes top 2 stack items leaving (task-addr -- )
+    rcall   PUSHF_	; (taskloop-addr task-addr -- )
+    call    TUCK	; (task-addr taskloop-addr task-addr -- )
+    rcall   TINIT	; Consumes top 2 stack items leaving (task-addr -- )
     rcall   TRUN    
     ret
 fdw DEFINRUN_L
-    
+ 
+; Pin/IO Control
+; Turn on the onboard LED [set pin 13 to high] ( -- )
 LEDON_L:
     .byte   NFA|5
     .ascii  "ledon"
@@ -1296,16 +1295,13 @@ LEDON_:
     in	    r26, 0x04
     ORI	    r26, 0b000100000
     out	    0x04, r26
-    ;ldi    r27, 0 ;debug
-    ;rcall PUSHF_ ;debug
-    
     in	    r26, 0x05
     ORI	    r26, 0b00100000
     out	    0x05, r26
-    ;rcall PUSHF_ ;debug
     ret
 fdw LEDON_L
-    
+
+; Turn off the onboard LED [set pin 13 to low] ( -- )
 LEDOFF_L:
     .byte   NFA|6
     .ascii  "ledoff"
@@ -1314,81 +1310,11 @@ LEDOFF_:
     in	    r26, 0x05
     ANDI    r26, 0b11011111
     out	    0x05, r26
-    ;ldi    r27, 0 ;debug
-    ;rcall PUSHF_ ;debug
     ret
 fdw LEDOFF_L
-    
-CALL_L:
-    .byte   NFA|4
-    .ascii  "call"
-    .align  1
-CALL_:
-    call TICK       ; Get XT from TICK. Stack: XT word-param
-    pop  R26        ; Pop the word parameter (low byte) into R26.
-    pop  R27        ; Pop the word parameter (high byte) into R27.
-    ; At this point, the stack contains only XT.
 
-    ; If needed, handle or use the word parameter in R26:R27 here.
-
-    call EXECUTE    ; Execute the XT (now properly positioned on the stack).
-    ret
-    
-fdw CALL_L
-    
-ONETWO_L:
-    .byte NFA|6
-    .ascii "onetwo"
-    .align 1
-ONETWO_:
-    ldi r26, 1
-    ldi r27, 0
-    rcall PUSHF_
-    ldi r26, 2
-    rcall PUSHF_
-    ret
-    fdw ONETWO_L
-    
-REVERSE_L:
-    .byte   NFA|7
-    .ascii  "reverse"
-    .align 1
-REVERSE_:
-    rcall   POPF_
-    mov t0, r26
-    mov r26, r27
-    mov r27, t0
-    rcall   PUSHF_
-    ret
-    fdw REVERSE_L
-    
-    
-HELLO_L:
-    .byte   NFA|5
-    .ascii  "hello"
-    .align  1
-HELLO:
-        call    XSQUOTE
-        .byte    11           ; String length
-        .ascii  "Hello World"
-        .align  1
-        call    TYPE
-        ret
-	fdw HELLO_L
-	
-CLEAR_L:
-    .byte    NFA|5                
-    .ascii   "clear"              
-    .align   1                    
-CLEAR_:
-    call    XSQUOTE
-    .byte   7
-    .ascii  "\033[2J\033[H"
-    .align  1
-    call    TYPE
-    ret
-    fdw CLEAR_L                   
-   
+; (pinNumber -- )
+; Set [digital] pin to high
 ON_L:
     .byte   NFA|2
     .ascii  "on"
@@ -1406,8 +1332,10 @@ ON_B:
     OR	    r26, r27
     out	    0x05, r26
     ret
-fdw ON_L
-    
+fdw ON_L    
+ 
+; (pinNumber -- )
+; Set [digital] pin to low
 OFF_L:
     .byte   NFA|3
     .ascii  "off"
@@ -1428,7 +1356,9 @@ OFF_B:
     out	    0x05, r26
     ret
 fdw OFF_L
-    
+
+; (pinNumber -- )
+; Set [digital] pin data direction to 0 [in]
 IN_L:
     .byte   NFA|2
     .ascii  "in"
@@ -1447,11 +1377,11 @@ IN_B:
     com	    r27
     AND	    r26, r27
     out	    0x04, r26
-    ;ldi	    r16, 0x00
-    ;out	    0x05, r16
     ret
 fdw IN_L
-    
+  
+; (pinNumber -- )
+; Set [digital] pin data direction to 1 [out]
 OUT_L:
     .byte   NFA|3
     .ascii  "out"
@@ -1470,9 +1400,40 @@ OUT_B:
     out	    0x04, r26
     ret
 fdw OUT_L
-    
-;------------------------------------------------------------
+   
+; Stack Management
+; Flip the high and low byte of item on TOS
+REVERSE_L:
+    .byte   NFA|7
+    .ascii  "reverse"
+    .align 1
+REVERSE_:
+    rcall   POPF_
+    mov t0, r26
+    mov r26, r27
+    mov r27, t0
+    rcall   PUSHF_
+    ret
+    fdw REVERSE_L
 
+; UX/UI
+; Clear the terminal
+CLEAR_L:
+    .byte    NFA|5                
+    .ascii   "clear"              
+    .align   1                    
+CLEAR_:
+    call    XSQUOTE
+    .byte   7
+    .ascii  "\033[2J\033[H"
+    .align  1
+    call    TYPE
+    ret
+    fdw CLEAR_L                   
+
+;------------------------------------------------------------
+; End of expanded dictionary
+    
 ;*********************************************************************
 ; EXIT --   Compile a return
 ;        variable link
