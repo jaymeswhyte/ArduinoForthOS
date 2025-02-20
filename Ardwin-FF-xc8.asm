@@ -1415,6 +1415,76 @@ REVERSE_:
     rcall   PUSHF_
     ret
     fdw REVERSE_L
+    
+; ( x n -- x')
+; Rotate x left by n bits
+ROTL_L:
+    .byte   NFA|4
+    .ascii  "rotl"
+    .align  1
+ROTL:
+    rcall   POPF_
+    ANDI    r26, 0x0F ; 1111 Bitmask on low bit gives n % 16
+    cpi	    r26, 0
+    breq    ROTL_END
+    clr	    r27		; Clear iterator high byte
+    rcall   PUSHF_	; Push iterator to stack
+    call    SWOP	; Get x on TOS
+    rjmp    ROTL_LOOP
+ROTL_END:
+    ret
+ROTL_LOOP:
+    rcall   POPF_	; Pop x
+    lsl	    r26		; Logical shift left low byte
+    rol	    r27		; Rotate left high byte, taking carry from lsl low
+    brcc    ROTL_SKIP	; If no carry after rol, skip next step
+    ORI	    r26, 0x01	; Set MSB of low byte to 1
+ROTL_SKIP:
+    rcall   PUSHF_	; Push iterated value to stack
+    call    SWOP	; Swap to get iterator on TOS
+    call    ONEMINUS	; Decrement iterator
+    rcall   POPF_	; Pop iterator
+    cpi	    r26, 0	; Compare iterator to 0
+    breq    ROTR_END	; If iterator 0, finished
+    rcall   PUSHF_	; Else, push it back
+    call    SWOP	; Swap again for next iteration
+    rjmp    ROTL_LOOP
+fdw ROTL_L
+    
+; ( x n -- x')
+; Rotate x right by n bits
+ROTR_L:
+    .byte   NFA|4
+    .ascii  "rotr"
+    .align  1
+ROTR:
+    rcall   POPF_	; Pop n
+    ANDI    r26, 0x0F	; 1111 Bitmask on low bit gives n % 16
+    cpi	    r26, 0	; If n%16==0, exit
+    breq    ROTR_END
+    clr	    r27		; Clear iterator high byte
+    rcall   PUSHF_	; Push iterator to stack
+    call    SWOP	; Get x on TOS
+    rjmp    ROTR_LOOP
+ROTR_END:
+    ret
+ROTR_LOOP:
+    rcall   POPF_	; Pop x
+    lsr	    r27		; Logical shift right high byte
+    ror	    r26		; Rotate right low byte, taking carry from lsr high
+    brcc    ROTR_SKIP	; If no carry after ror, skip next step
+    ORI	    r27, 0x80	; Set MSB of high byte to 1
+ROTR_SKIP:
+    rcall   PUSHF_	; Push iterated value to stack
+    call    SWOP	; Swap to get iterator on TOS
+    call    ONEMINUS	; Decrement iterator
+    rcall   POPF_	; Pop iterator
+    cpi	    r26, 0	; Compare iterator to 0
+    breq    ROTR_END	; If iterator 0, finished
+    rcall   PUSHF_	; Else, push it back
+    call    SWOP	; Swap again for next iteration
+    rjmp    ROTR_LOOP
+fdw ROTR_L
 
 ; UX/UI
 ; Clear the terminal
