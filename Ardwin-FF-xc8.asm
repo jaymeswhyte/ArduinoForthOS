@@ -1485,7 +1485,22 @@ ROTR_SKIP:
     call    SWOP	; Swap again for next iteration
     rjmp    ROTR_LOOP
 fdw ROTR_L
-
+    
+; ( x n -- 0/1)
+; Check if bit n of x is 1
+CHECKBIT_L:
+    .byte   NFA|8
+    .ascii  "checkbit"
+    .align  1
+CHECKBIT:
+    rcall   ROTR    ; Rotate right n times
+    rcall   POPF_
+    ANDI    r26, 0x01
+    clr	    r27
+    rcall   PUSHF_
+    ret
+fdw CHECKBIT_L
+    
 ; UX/UI
 ; Clear the terminal
 CLEAR_L:
