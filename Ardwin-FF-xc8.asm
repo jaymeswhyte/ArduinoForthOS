@@ -800,26 +800,27 @@ PUSHF_:
     ret
     
 POPF_:
-    mov	    r26, tosl
-    mov	    r27, tosh
-    m_drop
+    mov	    r26, tosl	; Low byte in r26
+    mov	    r27, tosh	; High byte in r27
+    m_drop		; Drop TOS
     ret
+    
 PARSEPIN_:
-    rcall   POPF_
-    cpi	    r26, 8
-    ldi	    r27, 0x01
-    brge    IS_PORTB
-    ldi	    r16, 0
+    rcall   POPF_	; Get pin num
+    cpi	    r26, 8	; Compare to 8
+    ldi	    r27, 0x01	; Return mask in r27
+    brge    IS_PORTB	; Handle PORTB if greq 8
+    ldi	    r16, 0	; Else, PORTB flag 0
     rjmp    PIN_MASK
 IS_PORTB:
     subi    r26, 8
     ldi	    r16, 1
 PIN_MASK:
-    cpi	    r26, 0 
-    breq    MASK_DONE
-    dec	    r26
-    lsl	    r27
-    rjmp    PIN_MASK
+    cpi	    r26, 0	; Compare pin num to 0
+    breq    MASK_DONE	; Finish if equal
+    dec	    r26		; Else, decrement pin num
+    lsl	    r27		; Shift return mask left
+    rjmp    PIN_MASK	
 MASK_DONE:
     ret	    ; R27-Pin Mask; R16 - PORTD/PORTB(0/1)
 
@@ -1514,7 +1515,99 @@ CLEAR_:
     .align  1
     call    TYPE
     ret
-    fdw CLEAR_L                   
+    fdw CLEAR_L       
+    
+    
+; LoRA Radio
+; transmit (x -- )
+; Transmit x on pin 3 via bitbanging
+TRNSMT_L:
+    .byte   NFA|6
+    .ascii  "trnsmt"
+    .align  1
+TRNSMT:
+    cli
+    m_dup
+    rcall   TRNSMT_BYTE
+    rcall   REVERSE_
+    rcall   TRNSMT_BYTE
+    sei
+    ret
+TRNSMT_BYTE:
+    ldi	    r30, 8 ; Loop counter
+    rcall   POPF_   
+    push    r26
+    ldi	    r26, 3
+    clr	    r27
+    rcall   PUSHF_  ; (3 -- )
+    m_dup	    ; (3 3 -- )
+    rcall   OUT_    ; (3 -- )
+    rcall   ON_	    ; ( -- )
+    ; Time sensitive from here forward
+    ldi	    r17, 101	; 1
+    rcall   DELAY_LOOP	; Delay so start bit registers after 3
+    ; Set pin 3 to LOW for start bit
+    in	    r26, 0x0B	; 1
+    ldi	    r27, 0xF7	; 1
+    AND	    r26, r27	; 1
+    out	    0x0B, r26	; 1
+    ; New delay "section"
+    ldi	    r17, 98	; 1
+    rcall   DELAY_LOOP	; 3
+    pop	    r26		; 2
+    NOP
+    NOP
+    rcall   TRNSMT_LOOP ; 3
+    ; New delay "section"
+    ; Set pin 3 to HI for stop bit
+    in	    r16, 0x0B			; 1
+    ORI	    r16, 0x08			; 1
+    out	    0x0B, r16			; 1
+    ldi	    r17, 104			; 1
+    rcall   DELAY_LOOP			; 3
+
+    ret
+TRNSMT_LOOP: ; Total: Low 5, High 10
+    mov	    r16, r26			; 1
+    ANDI    r16, 0x01	; Check LSB	; 1
+    cpi	    r16, 0			; 1
+    breq    TRNSMT_LO			; 1/2
+    ; Set pin 3 to 1
+    NOP	    ; Waste a cycle for balance   1
+    in	    r16, 0x0B			; 1
+    ORI	    r16, 0x08			; 1
+    out	    0x0B, r16			; 1
+    rjmp    TRNSMT_LOOP2		; 2
+TRNSMT_LO:  ; Total: 5 (only low)
+    ; Set pin 3 to 0
+    in	    r16, 0x0B			; 1
+    ANDI    r16, 0xF7			; 1
+    out	    0x0B, r16			; 1
+    rjmp    TRNSMT_LOOP2		; 2
+TRNSMT_LOOP2:	; Total: 14 (if not last); 9 (if last)
+    rcall   BIT_DELAY	; Delay to match baud timing	3
+    NOP
+    NOP
+    dec	    r30		; Counter -1			1
+    cpi	    r30, 0	; If 0, all 8 bits transmitted 1
+    breq    TXLOOPEND				;	1/2
+    NOP
+    NOP
+    ;lsr	    r27		; Logical shift right high byte 1
+    NOP
+    ror	    r26		; Rotate low B. Take carry.	1
+    rjmp    TRNSMT_LOOP				;	2
+TXLOOPEND:
+    ret	    ; 4
+BIT_DELAY:  ; Total: 3
+    ldi r17, 97 	; Adjust for loop overhead	1
+    rjmp DELAY_LOOP	; 2
+DELAY_LOOP: ; Total: 4 (or 7 on last iteration)
+    dec r17					    ;	1
+    cpi r17, 0					    ;   1
+    brne DELAY_LOOP	; 1/2
+    ret			; 4
+fdw TRNSMT_L
 
 ;------------------------------------------------------------
 ; End of expanded dictionary
