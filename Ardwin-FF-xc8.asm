@@ -1608,7 +1608,57 @@ DELAY_LOOP: ; Total: 4 (or 7 on last iteration)
     brne DELAY_LOOP	; 1/2
     ret			; 4
 fdw TRNSMT_L
-
+    
+; receive ( -- x )
+; receive 16-bit x via bitbanging
+RECEIVE_L:
+    .byte   NFA|7
+    .ascii  "receive"
+    .align  1
+RECEIVE:
+    clr	    r27
+    ldi	    r26, 2
+    rcall   PUSHF_
+    rcall   IN_
+    rcall   RCV_IDLE1
+    mov	    r26, r27
+    clr	    r27
+    rcall   RCV_IDLE1
+    rcall   PUSHF_
+RCV_IDLE1:  ; Idle loop 1 - Moves to loop 2 when input is high (preceding start bit)
+    rcall   RCV_STATE
+    cpi	    r16, 0
+    brne    RCV_IDLE2
+    rjmp    RCV_IDLE1
+RCV_IDLE2:  ; Idle loop 2 - moves to receive data on detecting falling edge (start bit)
+    rcall   RCV_STATE		; 3 + 6
+    cpi	    r16, 0		; 1
+    breq    RCV_LOOPSTART	; 1/2 - Falling edge indicates start bit
+    rjmp    RCV_IDLE2		; 2
+RCV_LOOPSTART:
+    ldi	    r30, 8	; 1
+    ldi	    r17, 100	; 1 - Delay time given by prev. overhead + overhead till next read
+    rcall   DELAY_LOOP	; 3
+    rjmp    RCV_LOOP	; 2
+RCV_LOOP:
+    rcall   RCV_STATE	; 3 + 6
+    lsr	    r16		; 1
+    lsr	    r16		; 1
+    lsl	    r27		; 1
+    OR	    r27, r16	; 1
+    ldi	    r17, 98	; 1
+    rcall   DELAY_LOOP	; 3
+    dec	    r30		; 1
+    cpi	    r30, 0	; 1
+    breq    RCV_END	; 1/2
+    rjmp    RCV_LOOP	; 2
+RCV_END:
+    ret
+RCV_STATE: ; 6
+    in	    r16, 0x09	; PIND		    1
+    andi    r16, 0x4	; Bitmask for pin3  1
+    ret					 ;  4
+fdw RECEIVE_L
 ;------------------------------------------------------------
 ; End of expanded dictionary
     
