@@ -1620,11 +1620,15 @@ RECEIVE:
     ldi	    r26, 2
     rcall   PUSHF_
     rcall   IN_
-    rcall   RCV_IDLE1
+    rcall   RCV_IDLE1	; Low Byte
     mov	    r26, r27
     clr	    r27
-    rcall   RCV_IDLE1
+    rcall   RCV_IDLE1	; High Byte
     rcall   PUSHF_
+    clr	    r27
+    mov	    r26, r26
+    rcall   PUSHF_	; Stop Bit
+    ret
 RCV_IDLE1:  ; Idle loop 1 - Moves to loop 2 when input is high (preceding start bit)
     rcall   RCV_STATE
     cpi	    r16, 0
@@ -1653,6 +1657,10 @@ RCV_LOOP:
     breq    RCV_END	; 1/2
     rjmp    RCV_LOOP	; 2
 RCV_END:
+    NOP
+    rcall   RCV_STATE	; 3 + 6
+    lsr	    r16
+    lsr	    r16
     ret
 RCV_STATE: ; 6
     in	    r16, 0x09	; PIND		    1
