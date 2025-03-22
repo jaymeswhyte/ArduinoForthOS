@@ -1545,7 +1545,7 @@ TRNSMT_BYTE:
     rcall   ON_	    ; ( -- )
     ; Time sensitive from here forward
     ldi	    r17, 101	; 1
-    rcall   DELAY_LOOP	; Delay so start bit registers after 3
+    rcall   DELAY_LOOP	; Delay so start bit registers after - 3
     ; Set pin 3 to LOW for start bit
     in	    r26, 0x0B	; 1
     ldi	    r27, 0xF7	; 1
@@ -1648,11 +1648,11 @@ done:
     ret
 fdw TXSTR_L
     
-; receive ( -- x )
+; rx16 ( -- x )
 ; receive 16-bit x via bitbanging
 RECEIVE_L:
-    .byte   NFA|7
-    .ascii  "receive"
+    .byte   NFA|4
+    .ascii  "rx16"
     .align  1
 RECEIVE:
     clr	    r27
@@ -1707,6 +1707,28 @@ RCV_STATE: ; 6
     andi    r16, 0x4	; Bitmask for pin2  1
     ret					 ;  4
 fdw RECEIVE_L
+    
+RX8_L:
+    .byte   NFA|4
+    .ascii  "rx8"
+    .align  1
+RX8:
+    clr	    r27
+    ldi	    r26, 2
+    rcall   PUSHF_
+    rcall   IN_
+    clr	    r27
+    rcall   RCV_IDLE1	; Low Byte
+    rcall   RCV_STATE	; Stop bit in r16
+    mov	    r26, r27
+    clr	    r27
+    rcall   PUSHF_	; Received byte
+    ldi	    r26, 1
+    lsr	    r16
+    lsr	    r16
+    eor	    r26, r16	; Flip stop bit as 1 indicates error
+    rcall   PUSHF_	; Stop bit
+    ret
 ;------------------------------------------------------------
 ; End of expanded dictionary
     
