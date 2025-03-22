@@ -823,7 +823,7 @@ PIN_MASK:
     rjmp    PIN_MASK	
 MASK_DONE:
     ret	    ; R27-Pin Mask; R16 - PORTD/PORTB(0/1)
-
+    
 ; Multitasking / Time-Sharing related words:
 ; Translated into AVR ASM (with some modifications) from Forth implementation written my Mikael Nordman
     
@@ -1519,11 +1519,11 @@ CLEAR_:
     
     
 ; LoRA Radio
-; transmit (x -- )
-; Transmit x on pin 3 via bitbanging
+; tx16 (x -- )
+; Transmit x on pin 3 via bitbanging (low byte then high)
 TRNSMT_L:
-    .byte   NFA|6
-    .ascii  "trnsmt"
+    .byte   NFA|4
+    .ascii  "tx16"
     .align  1
 TRNSMT:
     cli
@@ -1609,6 +1609,45 @@ DELAY_LOOP: ; Total: 4 (or 7 on last iteration)
     ret			; 4
 fdw TRNSMT_L
     
+; tx8 (x -- )
+; Transmit Low byte of x on pin 3 via bitbanging
+TRNSMT8_L:
+    .byte   NFA|3
+    .ascii  "tx8"
+    .align  1
+TRNSMT8:
+    ;cli
+    rcall   TRNSMT_BYTE
+    ;sei
+    ret
+fdw TRNSMT8_L
+    
+; txstr (str-addr -- )
+; Transmit null-terminated string over pin 3
+TXSTR_L:
+    .byte   NFA|5
+    .ascii  "txstr"
+    .align 1
+TXSTR:
+    rcall   ONEPLUS
+    rjmp    TXSTR_LOOP
+TXSTR_LOOP:
+    m_dup
+    rcall   POPF_
+    ld	    r16, X      ; Load byte at address X (r26:r27) into r16
+    cpi	    r16, 0x00   ; Compare with null (0x00)
+    breq    done	; If null, ret
+    rcall   ONEPLUS	; Else increment pointer
+    mov	    r26, r16	; Move current ascii value into r26:r27
+    clr	    r27
+    rcall   PUSHF_	; Push ascii byte to stack
+    rcall   TRNSMT_BYTE	; Transmit ascii byte
+    rjmp    TXSTR_LOOP
+done:
+    rcall   POPF_
+    ret
+fdw TXSTR_L
+    
 ; receive ( -- x )
 ; receive 16-bit x via bitbanging
 RECEIVE_L:
@@ -1620,6 +1659,7 @@ RECEIVE:
     ldi	    r26, 2
     rcall   PUSHF_
     rcall   IN_
+    clr	    r27
     rcall   RCV_IDLE1	; Low Byte
     mov	    r26, r27
     clr	    r27
@@ -1627,7 +1667,7 @@ RECEIVE:
     rcall   PUSHF_
     clr	    r27
     mov	    r26, r26
-    rcall   PUSHF_	; Stop Bit
+    ;rcall   PUSHF_	; Stop Bit
     ret
 RCV_IDLE1:  ; Idle loop 1 - Moves to loop 2 when input is high (preceding start bit)
     rcall   RCV_STATE
@@ -1648,8 +1688,8 @@ RCV_LOOP:
     rcall   RCV_STATE	; 3 + 6
     lsr	    r16		; 1
     lsr	    r16		; 1
-    lsl	    r27		; 1
-    OR	    r27, r16	; 1
+    ror	    r16		; 1
+    ror	    r27		; 1
     ldi	    r17, 98	; 1
     rcall   DELAY_LOOP	; 3
     dec	    r30		; 1
@@ -1664,7 +1704,7 @@ RCV_END:
     ret
 RCV_STATE: ; 6
     in	    r16, 0x09	; PIND		    1
-    andi    r16, 0x4	; Bitmask for pin3  1
+    andi    r16, 0x4	; Bitmask for pin2  1
     ret					 ;  4
 fdw RECEIVE_L
 ;------------------------------------------------------------
