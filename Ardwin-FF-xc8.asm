@@ -1661,13 +1661,16 @@ RECEIVE:
     rcall   IN_
     clr	    r27
     rcall   RCV_IDLE1	; Low Byte
+    mov	    r31, r16	; Stop bit 1
     mov	    r26, r27
     clr	    r27
     rcall   RCV_IDLE1	; High Byte
     rcall   PUSHF_
+    AND	    r16, r31	; Stop bit both stop bits should be 1
+    ldi	    r26, 1	
+    eor	    r26, r16	; Invert
     clr	    r27
-    mov	    r26, r26
-    ;rcall   PUSHF_	; Stop Bit
+    rcall   PUSHF_
     ret
 RCV_IDLE1:  ; Idle loop 1 - Moves to loop 2 when input is high (preceding start bit)
     rcall   RCV_STATE
@@ -1709,7 +1712,7 @@ RCV_STATE: ; 6
 fdw RECEIVE_L
     
 RX8_L:
-    .byte   NFA|4
+    .byte   NFA|3
     .ascii  "rx8"
     .align  1
 RX8:
@@ -1729,6 +1732,41 @@ RX8:
     eor	    r26, r16	; Flip stop bit as 1 indicates error
     rcall   PUSHF_	; Stop bit
     ret
+fdw RX8_L
+ 
+; atcmd ( -- )
+; Put lora module into AT Command mode
+ATCMD_L:
+    .byte   NFA|5
+    .ascii  "atcmd"
+    .align  1
+ATCMD:
+    clr r27
+    ldi	    r26, 0x0A	; LF
+    rcall   PUSHF_
+    ldi	    r26, 0x0D	; CR
+    rcall   PUSHF_
+    ldi	    r26, 0x2B	; +
+    rcall   PUSHF_
+    m_dup
+    m_dup
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    ret
+fdw ATCMD_L
+    
+; atchan ( n{0-30} -- )
+; switch LoRA module to channel n
+ATCHAN_L:
+    .byte   NFA|6
+    .ascii  "atchan"
+    .align  1
+ATCHAN:
+    rcall ATCMD
+    
 ;------------------------------------------------------------
 ; End of expanded dictionary
     
