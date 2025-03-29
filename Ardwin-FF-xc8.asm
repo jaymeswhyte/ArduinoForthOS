@@ -1502,6 +1502,41 @@ CHECKBIT:
     ret
 fdw CHECKBIT_L
     
+; asciihex ( n -- n' )
+; Convert 8-bit value to ascii hex representation (2 chars)
+; n' is a 16-bit value with an 8-bit ascii value in each nibble
+ASCHEX_L:
+    .byte   NFA|8
+    .ascii  "asciihex"
+    .align  1
+ASCHEX:
+    rcall   POPF_
+    clr	    r27
+    mov	    r16, r26     ; Duplicate value (should be 8-bit)
+    ; High nibble
+    lsr	    r26
+    lsr	    r26
+    lsr	    r26
+    lsr	    r26
+    rcall   ASCHEX_NIB
+    mov	    r27, r26	; High nibble conversion in high byte
+    ANDI    r16, 0x0F	; Low nibble
+    mov	    r26, r16
+    rcall   ASCHEX_NIB
+    rcall   PUSHF_
+    ret
+ASCHEX_NIB:
+    cpi	    r26, 10
+    brlo    ASCHEX_LT10	; If high nibble < 10, add 0x30 ('0'-'9' ascii)
+    ldi	    r30, 0x37	
+    add    r26, r30	; Otherwise, add 0x37 ('A'-'F' ascii)
+    ret
+ASCHEX_LT10:
+    ldi	    r30, 0x30 
+    add	    r26, r30	; Add 0x30
+    ret
+ fdw ASCHEX_L
+   
 ; UX/UI
 ; Clear the terminal
 CLEAR_L:
@@ -1733,6 +1768,24 @@ RX8:
     rcall   PUSHF_	; Stop bit
     ret
 fdw RX8_L
+    
+    
+; crlf ( -- )
+; Transmit carriage return + line feed on pin 3
+CRLF_L:
+    .byte   NFA|4
+    .ascii  "crlf"
+    .align  1
+CRLF:
+    clr r27
+    ldi	    r26, 0x0A	; LF
+    rcall   PUSHF_
+    ldi	    r26, 0x0D	; CR
+    rcall   PUSHF_
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    ret
+fdw CRLF_L
  
 ; atcmd ( -- )
 ; Put lora module into AT Command mode
@@ -1741,11 +1794,7 @@ ATCMD_L:
     .ascii  "atcmd"
     .align  1
 ATCMD:
-    clr r27
-    ldi	    r26, 0x0A	; LF
-    rcall   PUSHF_
-    ldi	    r26, 0x0D	; CR
-    rcall   PUSHF_
+    clr	    r27
     ldi	    r26, 0x2B	; +
     rcall   PUSHF_
     m_dup
@@ -1753,10 +1802,38 @@ ATCMD:
     rcall   TRNSMT_BYTE
     rcall   TRNSMT_BYTE
     rcall   TRNSMT_BYTE
-    rcall   TRNSMT_BYTE
-    rcall   TRNSMT_BYTE
+    rcall   CRLF
     ret
 fdw ATCMD_L
+
+; Restart lora module
+ATRESET_L:
+    .byte   NFA|7
+    .ascii  "atreset"
+    .align  1
+ATRESET:
+    rcall   ATCMD
+    clr	    r27
+    ldi	    r26, 65
+    rcall   PUSHF_
+    ldi	    r26, 84
+    rcall   PUSHF_
+    ldi	    r26, 43
+    rcall   PUSHF_
+    ldi	    r26, 82
+    rcall   PUSHF_
+    ldi	    r26, 69
+    rcall   PUSHF_
+    ldi	    r26, 83
+    rcall   PUSHF_
+    ldi	    r26, 69
+    rcall   PUSHF_
+    ldi	    r26, 84
+    rcall   PUSHF_
+    ldi	    r31, 9
+    rcall    ATCHLOOP
+    ret
+fdw ATRESET_L    
     
 ; atchan ( n{0-30} -- )
 ; switch LoRA module to channel n
@@ -1765,8 +1842,45 @@ ATCHAN_L:
     .ascii  "atchan"
     .align  1
 ATCHAN:
-    rcall ATCMD
-    
+    rcall   ATCMD
+    rcall   ASCHEX
+    rcall   REVERSE_	; Swap high and low byte
+    ;rcall   ATCMD
+    clr	    r27
+    ldi     r26, 76
+    rcall   PUSHF_
+    ldi     r26, 69
+    rcall   PUSHF_
+    ldi     r26, 78
+    rcall   PUSHF_
+    ldi     r26, 78
+    rcall   PUSHF_
+    ldi     r26, 65
+    rcall   PUSHF_
+    ldi     r26, 72
+    rcall   PUSHF_
+    ldi     r26, 67
+    rcall   PUSHF_
+    ldi     r26, 43
+    rcall   PUSHF_
+    ldi     r26, 84
+    rcall   PUSHF_
+    ldi     r26, 65
+    rcall   PUSHF_
+    ldi	    r31, 11
+    rcall   ATCHLOOP	; Tramsit string
+    rcall   TRNSMT	; AsciiHex chan num
+    rcall   CRLF
+    ret
+ATCHLOOP:
+    dec	    r31
+    cpi	    r31, 0
+    breq    ATCHDONE
+    rcall   TRNSMT_BYTE
+    rjmp    ATCHLOOP
+ATCHDONE:
+    ret
+fdw ATCHAN_L    
 ;------------------------------------------------------------
 ; End of expanded dictionary
     
