@@ -800,29 +800,30 @@ PUSHF_:
     ret
     
 POPF_:
-    mov	    r26, tosl
-    mov	    r27, tosh
-    m_drop
+    mov	    r26, tosl	; Low byte in r26
+    mov	    r27, tosh	; High byte in r27
+    m_drop		; Drop TOS
     ret
+    
 PARSEPIN_:
-    rcall   POPF_
-    cpi	    r26, 8
-    ldi	    r27, 0x01
-    brge    IS_PORTB
-    ldi	    r16, 0
+    rcall   POPF_	; Get pin num
+    cpi	    r26, 8	; Compare to 8
+    ldi	    r27, 0x01	; Return mask in r27
+    brge    IS_PORTB	; Handle PORTB if greq 8
+    ldi	    r16, 0	; Else, PORTB flag 0
     rjmp    PIN_MASK
 IS_PORTB:
     subi    r26, 8
     ldi	    r16, 1
 PIN_MASK:
-    cpi	    r26, 0 
-    breq    MASK_DONE
-    dec	    r26
-    lsl	    r27
-    rjmp    PIN_MASK
+    cpi	    r26, 0	; Compare pin num to 0
+    breq    MASK_DONE	; Finish if equal
+    dec	    r26		; Else, decrement pin num
+    lsl	    r27		; Shift return mask left
+    rjmp    PIN_MASK	
 MASK_DONE:
     ret	    ; R27-Pin Mask; R16 - PORTD/PORTB(0/1)
-
+    
 ; Multitasking / Time-Sharing related words:
 ; Translated into AVR ASM (with some modifications) from Forth implementation written my Mikael Nordman
     
@@ -1501,6 +1502,41 @@ CHECKBIT:
     ret
 fdw CHECKBIT_L
     
+; asciihex ( n -- n' )
+; Convert 8-bit value to ascii hex representation (2 chars)
+; n' is a 16-bit value with an 8-bit ascii value in each nibble
+ASCHEX_L:
+    .byte   NFA|8
+    .ascii  "asciihex"
+    .align  1
+ASCHEX:
+    rcall   POPF_
+    clr	    r27
+    mov	    r16, r26     ; Duplicate value (should be 8-bit)
+    ; High nibble
+    lsr	    r26
+    lsr	    r26
+    lsr	    r26
+    lsr	    r26
+    rcall   ASCHEX_NIB
+    mov	    r27, r26	; High nibble conversion in high byte
+    ANDI    r16, 0x0F	; Low nibble
+    mov	    r26, r16
+    rcall   ASCHEX_NIB
+    rcall   PUSHF_
+    ret
+ASCHEX_NIB:
+    cpi	    r26, 10
+    brlo    ASCHEX_LT10	; If high nibble < 10, add 0x30 ('0'-'9' ascii)
+    ldi	    r30, 0x37	
+    add    r26, r30	; Otherwise, add 0x37 ('A'-'F' ascii)
+    ret
+ASCHEX_LT10:
+    ldi	    r30, 0x30 
+    add	    r26, r30	; Add 0x30
+    ret
+ fdw ASCHEX_L
+   
 ; UX/UI
 ; Clear the terminal
 CLEAR_L:
@@ -1514,8 +1550,337 @@ CLEAR_:
     .align  1
     call    TYPE
     ret
-    fdw CLEAR_L                   
+    fdw CLEAR_L       
+    
+    
+; LoRA Radio
+; tx16 (x -- )
+; Transmit x on pin 3 via bitbanging (low byte then high)
+TRNSMT_L:
+    .byte   NFA|4
+    .ascii  "tx16"
+    .align  1
+TRNSMT:
+    cli
+    m_dup
+    rcall   TRNSMT_BYTE
+    rcall   REVERSE_
+    rcall   TRNSMT_BYTE
+    sei
+    ret
+TRNSMT_BYTE:
+    ldi	    r30, 8 ; Loop counter
+    rcall   POPF_   
+    push    r26
+    ldi	    r26, 3
+    clr	    r27
+    rcall   PUSHF_  ; (3 -- )
+    m_dup	    ; (3 3 -- )
+    rcall   OUT_    ; (3 -- )
+    rcall   ON_	    ; ( -- )
+    ; Time sensitive from here forward
+    ldi	    r17, 101	; 1
+    rcall   DELAY_LOOP	; Delay so start bit registers after - 3
+    ; Set pin 3 to LOW for start bit
+    in	    r26, 0x0B	; 1
+    ldi	    r27, 0xF7	; 1
+    AND	    r26, r27	; 1
+    out	    0x0B, r26	; 1
+    ; New delay "section"
+    ldi	    r17, 98	; 1
+    rcall   DELAY_LOOP	; 3
+    pop	    r26		; 2
+    NOP
+    NOP
+    rcall   TRNSMT_LOOP ; 3
+    ; New delay "section"
+    ; Set pin 3 to HI for stop bit
+    in	    r16, 0x0B			; 1
+    ORI	    r16, 0x08			; 1
+    out	    0x0B, r16			; 1
+    ldi	    r17, 104			; 1
+    rcall   DELAY_LOOP			; 3
 
+    ret
+TRNSMT_LOOP: ; Total: Low 5, High 10
+    mov	    r16, r26			; 1
+    ANDI    r16, 0x01	; Check LSB	; 1
+    cpi	    r16, 0			; 1
+    breq    TRNSMT_LO			; 1/2
+    ; Set pin 3 to 1
+    NOP	    ; Waste a cycle for balance   1
+    in	    r16, 0x0B			; 1
+    ORI	    r16, 0x08			; 1
+    out	    0x0B, r16			; 1
+    rjmp    TRNSMT_LOOP2		; 2
+TRNSMT_LO:  ; Total: 5 (only low)
+    ; Set pin 3 to 0
+    in	    r16, 0x0B			; 1
+    ANDI    r16, 0xF7			; 1
+    out	    0x0B, r16			; 1
+    rjmp    TRNSMT_LOOP2		; 2
+TRNSMT_LOOP2:	; Total: 14 (if not last); 9 (if last)
+    rcall   BIT_DELAY	; Delay to match baud timing	3
+    NOP
+    NOP
+    dec	    r30		; Counter -1			1
+    cpi	    r30, 0	; If 0, all 8 bits transmitted 1
+    breq    TXLOOPEND				;	1/2
+    NOP
+    NOP
+    ;lsr	    r27		; Logical shift right high byte 1
+    NOP
+    ror	    r26		; Rotate low B. Take carry.	1
+    rjmp    TRNSMT_LOOP				;	2
+TXLOOPEND:
+    ret	    ; 4
+BIT_DELAY:  ; Total: 3
+    ldi r17, 97 	; Adjust for loop overhead	1
+    rjmp DELAY_LOOP	; 2
+DELAY_LOOP: ; Total: 4 (or 7 on last iteration)
+    dec r17					    ;	1
+    cpi r17, 0					    ;   1
+    brne DELAY_LOOP	; 1/2
+    ret			; 4
+fdw TRNSMT_L
+    
+; tx8 (x -- )
+; Transmit Low byte of x on pin 3 via bitbanging
+TRNSMT8_L:
+    .byte   NFA|3
+    .ascii  "tx8"
+    .align  1
+TRNSMT8:
+    ;cli
+    rcall   TRNSMT_BYTE
+    ;sei
+    ret
+fdw TRNSMT8_L
+    
+; txstr (str-addr -- )
+; Transmit null-terminated string over pin 3
+TXSTR_L:
+    .byte   NFA|5
+    .ascii  "txstr"
+    .align 1
+TXSTR:
+    rcall   ONEPLUS
+    rjmp    TXSTR_LOOP
+TXSTR_LOOP:
+    m_dup
+    rcall   POPF_
+    ld	    r16, X      ; Load byte at address X (r26:r27) into r16
+    cpi	    r16, 0x00   ; Compare with null (0x00)
+    breq    done	; If null, ret
+    rcall   ONEPLUS	; Else increment pointer
+    mov	    r26, r16	; Move current ascii value into r26:r27
+    clr	    r27
+    rcall   PUSHF_	; Push ascii byte to stack
+    rcall   TRNSMT_BYTE	; Transmit ascii byte
+    rjmp    TXSTR_LOOP
+done:
+    rcall   POPF_
+    ret
+fdw TXSTR_L
+    
+; rx16 ( -- x )
+; receive 16-bit x via bitbanging
+RECEIVE_L:
+    .byte   NFA|4
+    .ascii  "rx16"
+    .align  1
+RECEIVE:
+    clr	    r27
+    ldi	    r26, 2
+    rcall   PUSHF_
+    rcall   IN_
+    clr	    r27
+    rcall   RCV_IDLE1	; Low Byte
+    mov	    r31, r16	; Stop bit 1
+    mov	    r26, r27
+    clr	    r27
+    rcall   RCV_IDLE1	; High Byte
+    rcall   PUSHF_
+    AND	    r16, r31	; Stop bit both stop bits should be 1
+    ldi	    r26, 1	
+    eor	    r26, r16	; Invert
+    clr	    r27
+    rcall   PUSHF_
+    ret
+RCV_IDLE1:  ; Idle loop 1 - Moves to loop 2 when input is high (preceding start bit)
+    rcall   RCV_STATE
+    cpi	    r16, 0
+    brne    RCV_IDLE2
+    rjmp    RCV_IDLE1
+RCV_IDLE2:  ; Idle loop 2 - moves to receive data on detecting falling edge (start bit)
+    rcall   RCV_STATE		; 3 + 6
+    cpi	    r16, 0		; 1
+    breq    RCV_LOOPSTART	; 1/2 - Falling edge indicates start bit
+    rjmp    RCV_IDLE2		; 2
+RCV_LOOPSTART:
+    ldi	    r30, 8	; 1
+    ldi	    r17, 100	; 1 - Delay time given by prev. overhead + overhead till next read
+    rcall   DELAY_LOOP	; 3
+    rjmp    RCV_LOOP	; 2
+RCV_LOOP:
+    rcall   RCV_STATE	; 3 + 6
+    lsr	    r16		; 1
+    lsr	    r16		; 1
+    ror	    r16		; 1
+    ror	    r27		; 1
+    ldi	    r17, 98	; 1
+    rcall   DELAY_LOOP	; 3
+    dec	    r30		; 1
+    cpi	    r30, 0	; 1
+    breq    RCV_END	; 1/2
+    rjmp    RCV_LOOP	; 2
+RCV_END:
+    NOP
+    rcall   RCV_STATE	; 3 + 6
+    lsr	    r16
+    lsr	    r16
+    ret
+RCV_STATE: ; 6
+    in	    r16, 0x09	; PIND		    1
+    andi    r16, 0x4	; Bitmask for pin2  1
+    ret					 ;  4
+fdw RECEIVE_L
+    
+RX8_L:
+    .byte   NFA|3
+    .ascii  "rx8"
+    .align  1
+RX8:
+    clr	    r27
+    ldi	    r26, 2
+    rcall   PUSHF_
+    rcall   IN_
+    clr	    r27
+    rcall   RCV_IDLE1	; Low Byte
+    rcall   RCV_STATE	; Stop bit in r16
+    mov	    r26, r27
+    clr	    r27
+    rcall   PUSHF_	; Received byte
+    ldi	    r26, 1
+    lsr	    r16
+    lsr	    r16
+    eor	    r26, r16	; Flip stop bit as 1 indicates error
+    rcall   PUSHF_	; Stop bit
+    ret
+fdw RX8_L
+    
+    
+; crlf ( -- )
+; Transmit carriage return + line feed on pin 3
+CRLF_L:
+    .byte   NFA|4
+    .ascii  "crlf"
+    .align  1
+CRLF:
+    clr r27
+    ldi	    r26, 0x0A	; LF
+    rcall   PUSHF_
+    ldi	    r26, 0x0D	; CR
+    rcall   PUSHF_
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    ret
+fdw CRLF_L
+ 
+; atcmd ( -- )
+; Put lora module into AT Command mode
+ATCMD_L:
+    .byte   NFA|5
+    .ascii  "atcmd"
+    .align  1
+ATCMD:
+    clr	    r27
+    ldi	    r26, 0x2B	; +
+    rcall   PUSHF_
+    m_dup
+    m_dup
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    rcall   TRNSMT_BYTE
+    rcall   CRLF
+    ret
+fdw ATCMD_L
+
+; Restart lora module
+ATRESET_L:
+    .byte   NFA|7
+    .ascii  "atreset"
+    .align  1
+ATRESET:
+    rcall   ATCMD
+    clr	    r27
+    ldi	    r26, 65
+    rcall   PUSHF_
+    ldi	    r26, 84
+    rcall   PUSHF_
+    ldi	    r26, 43
+    rcall   PUSHF_
+    ldi	    r26, 82
+    rcall   PUSHF_
+    ldi	    r26, 69
+    rcall   PUSHF_
+    ldi	    r26, 83
+    rcall   PUSHF_
+    ldi	    r26, 69
+    rcall   PUSHF_
+    ldi	    r26, 84
+    rcall   PUSHF_
+    ldi	    r31, 9
+    rcall    ATCHLOOP
+    ret
+fdw ATRESET_L    
+    
+; atchan ( n{0-30} -- )
+; switch LoRA module to channel n
+ATCHAN_L:
+    .byte   NFA|6
+    .ascii  "atchan"
+    .align  1
+ATCHAN:
+    rcall   ATCMD
+    rcall   ASCHEX
+    rcall   REVERSE_	; Swap high and low byte
+    ;rcall   ATCMD
+    clr	    r27
+    ldi     r26, 76
+    rcall   PUSHF_
+    ldi     r26, 69
+    rcall   PUSHF_
+    ldi     r26, 78
+    rcall   PUSHF_
+    ldi     r26, 78
+    rcall   PUSHF_
+    ldi     r26, 65
+    rcall   PUSHF_
+    ldi     r26, 72
+    rcall   PUSHF_
+    ldi     r26, 67
+    rcall   PUSHF_
+    ldi     r26, 43
+    rcall   PUSHF_
+    ldi     r26, 84
+    rcall   PUSHF_
+    ldi     r26, 65
+    rcall   PUSHF_
+    ldi	    r31, 11
+    rcall   ATCHLOOP	; Tramsit string
+    rcall   TRNSMT	; AsciiHex chan num
+    rcall   CRLF
+    ret
+ATCHLOOP:
+    dec	    r31
+    cpi	    r31, 0
+    breq    ATCHDONE
+    rcall   TRNSMT_BYTE
+    rjmp    ATCHLOOP
+ATCHDONE:
+    ret
+fdw ATCHAN_L    
 ;------------------------------------------------------------
 ; End of expanded dictionary
     
